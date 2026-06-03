@@ -1,0 +1,564 @@
+\documentclass[conference]{IEEEtran}
+
+% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{url}
+\usepackage{float}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\begin{document}
+
+\title{Machine Learning-Based Prediction of Machining Process State and\\
+Spindle Output Power from CNC Milling Sensor Data}
+
+\author{
+\IEEEauthorblockN{Zil Muarij (456149)\IEEEauthorrefmark{1},
+Ayman Arshad (479690)\IEEEauthorrefmark{1},
+Khwaja Qais (475156)\IEEEauthorrefmark{1},
+Abdullah Naeem (465448)\IEEEauthorrefmark{1}}
+\IEEEauthorblockA{\IEEEauthorrefmark{1}Department of Mechanical Engineering,\\
+College of Electrical \& Mechanical Engineering (CEME),\\
+National University of Sciences and Technology (NUST), Rawalpindi, Pakistan}
+}
+
+\maketitle
+
+% ── ABSTRACT ──────────────────────────────────────────────────────────────────
+\begin{abstract}
+This paper presents a machine learning framework for predicting machining process states
+and spindle output power from CNC milling sensor data. The dataset comprises 1,448 samples
+(post-cleaning) with 48 features including axis velocities, currents, voltages, and feed
+rates recorded during multi-process milling operations. Three classification models —
+Logistic Regression, Support Vector Machine (SVM), and Random Forest — are trained for
+dual-target prediction of machining process category and machine speed state. Additionally,
+three regression models — Linear Regression, Random Forest Regressor, and Support Vector
+Regressor (SVR) — predict spindle output power. Random Forest achieves the highest
+classification accuracy of 65.6\% (machining process) and 100\% (machine state), and
+the best regression performance with $R^2 = 0.9999$ and relative RMSE of 0.37\%.
+Statistical significance tests (Wilcoxon, $p = 0.00195$) confirm Random Forest's
+superiority. These results demonstrate that ensemble tree methods are highly suitable for
+real-time CNC process monitoring applications.
+\end{abstract}
+
+\begin{IEEEkeywords}
+CNC milling, machining process classification, spindle power prediction, Random Forest,
+Support Vector Machine, machine learning, predictive manufacturing.
+\end{IEEEkeywords}
+
+% ── I. INTRODUCTION ───────────────────────────────────────────────────────────
+\section{Introduction}
+
+Modern computer numerical control (CNC) machining centers generate vast streams of
+real-time sensor data covering axis positions, velocities, motor currents, voltages,
+and feed rates. Harnessing this data through machine learning (ML) offers significant
+opportunities for process monitoring, quality assurance, and predictive maintenance
+— core pillars of Industry 4.0 manufacturing \cite{ref1}.
+
+Manual identification of machining states (e.g., drilling, milling, idle) is error-prone
+and impractical at production scale. Automated classification of process states enables
+real-time anomaly detection, tool wear monitoring, and adaptive control. Simultaneously,
+accurate prediction of spindle output power supports energy efficiency optimization and
+avoids overloading drive systems \cite{ref2}.
+
+Prior work has demonstrated the utility of tree-based ensembles \cite{ref3} and SVMs
+\cite{ref4} for machining process classification. However, few studies simultaneously
+address multi-output classification and regression on the same sensor stream with
+rigorous statistical validation. This paper addresses this gap using the UC Irvine
+CNC Milling dataset \cite{ref5}.
+
+The remainder of this paper is organized as follows. Section~\ref{sec:dataset} describes
+the dataset and experimental setup. Section~\ref{sec:methodology} details preprocessing
+and model formulations. Section~\ref{sec:results} presents and compares all results.
+Section~\ref{sec:discussion} interprets findings from an engineering perspective.
+Section~\ref{sec:conclusion} concludes with future directions.
+
+% ── II. DATASET & EXPERIMENTAL SETUP ──────────────────────────────────────────
+\section{Dataset \& Experimental Setup}
+\label{sec:dataset}
+
+\subsection{Dataset Source}
+
+The dataset used is the \textit{CNC Mill Tool Wear} dataset (experiment\_03), sourced
+from the UC Irvine Machine Learning Repository \cite{ref5}. It contains time-series
+sensor recordings from a CNC milling machine performing multiple distinct machining
+operations, logged at fixed sampling intervals.
+
+\subsection{Feature Description}
+
+The raw dataset contains sensor readings from three linear axes (X1, Y1, Z1) and the
+spindle (S1), covering actual/command positions, velocities, accelerations, output
+currents, voltages, DC bus voltages, output power, and current feedback signals. Two
+derived features were engineered (Section~\ref{sec:fe}), yielding 48 input features
+after preprocessing. Table~\ref{tab:features} summarises the key feature groups.
+
+\begin{table}[h]
+\caption{Feature Groups in the CNC Milling Dataset}
+\label{tab:features}
+\centering
+\begin{tabular}{lll}
+\toprule
+\textbf{Group} & \textbf{Examples} & \textbf{Type} \\
+\midrule
+Axis Position   & X1\_ActualPosition, Y1\_CommandPosition  & Continuous \\
+Axis Velocity   & X1\_ActualVelocity, Z1\_CommandVelocity  & Continuous \\
+Axis Current    & X1\_OutputCurrent, Y1\_CurrentFeedback   & Continuous \\
+Axis Voltage    & X1\_OutputVoltage, Y1\_DCBusVoltage      & Continuous \\
+Axis Power      & X1\_OutputPower, Y1\_OutputPower         & Continuous \\
+Spindle         & S1\_OutputCurrent, S1\_OutputVoltage     & Continuous \\
+Process Info    & M1\_CURRENT\_FEEDRATE, NT\_PROGRAM\_NUMBER & Mixed \\
+Engineered      & Resultant\_Velocity, Spindle\_Power\_Calc & Continuous \\
+\midrule
+\textbf{Targets} & Machining\_Process (9 classes) & Categorical \\
+                 & Machine\_State (3 classes)      & Categorical \\
+                 & S1\_OutputPower                 & Continuous \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Exploratory Data Analysis}
+
+Fig.~\ref{fig:histograms} shows the distribution histograms of all 48 features. Most
+axis position and velocity features exhibit bimodal or multimodal distributions,
+reflecting the distinct operating regimes of different machining processes. Spindle
+features (S1) show narrow, peaked distributions indicating stable spindle operation,
+while feed rate and program number features display discrete distributions consistent
+with their categorical/stepped nature.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{Screenshot 2026-05-03 230347.png}
+    \caption{Feature distribution histograms for all 48 input variables. Bimodal
+             distributions in axis features reflect multiple distinct machining states.}
+    \label{fig:histograms}
+\end{figure}
+
+\subsection{Train/Validation/Test Split}
+
+After outlier removal, 1,448 samples remained. A stratified 70/15/15 split was applied:
+
+\begin{itemize}
+    \item \textbf{Training set:} 1,013 samples (70\%)
+    \item \textbf{Validation set:} 217 samples (15\%)
+    \item \textbf{Test set:} 218 samples (15\%)
+\end{itemize}
+
+Stratification was performed on the \textit{Machining\_Process} label to ensure class
+balance across all splits. All models used identical splits with \texttt{random\_state=42}
+for full reproducibility.
+
+% ── III. METHODOLOGY ──────────────────────────────────────────────────────────
+\section{Methodology}
+\label{sec:methodology}
+
+\subsection{Preprocessing}
+
+\textbf{Missing Value Imputation:} Missing values were imputed using column means —
+appropriate for sensor data where missingness is random due to transmission gaps rather
+than systematic failure.
+
+\textbf{Outlier Removal:} Z-score based outlier detection was applied to all numeric
+features. Rows where more than 5\% of features exceeded $|z| > 3$ were removed:
+\begin{equation}
+    z_i = \frac{x_i - \mu}{\sigma}, \quad \text{remove if } \frac{1}{p}\sum_{j=1}^{p}
+    \mathbf{1}[|z_{ij}|>3] > 0.05
+    \label{eq:zscore}
+\end{equation}
+This retained 1,448 of the original samples, removing approximately 10\% as statistical
+outliers. Samples at true operating extremes were retained to preserve physical validity.
+
+\textbf{Normalization:} All input features were standardized using zero-mean,
+unit-variance scaling:
+\begin{equation}
+    x' = \frac{x - \mu_{\text{train}}}{\sigma_{\text{train}}}
+    \label{eq:scaling}
+\end{equation}
+Scaling parameters were computed on the training set only, then applied to validation
+and test sets to prevent data leakage.
+
+\subsection{Feature Engineering}
+\label{sec:fe}
+
+Two physically meaningful features were derived:
+
+\textbf{Feature 1 — Resultant Velocity:} The Euclidean norm of the three axis velocities
+represents the true magnitude of tool motion in 3D space:
+\begin{equation}
+    v_{\text{res}} = \sqrt{v_{X}^2 + v_{Y}^2 + v_{Z}^2}
+    \label{eq:vres}
+\end{equation}
+This feature was subsequently used to define the \textit{Machine\_State} target via
+tertile quantisation (Low/Medium/High speed).
+
+\textbf{Feature 2 — Spindle Power (Calculated):} Electrical power delivered to the
+spindle motor was computed from measured current and voltage:
+\begin{equation}
+    P_{\text{spindle}} = I_{S1} \times V_{S1}
+    \label{eq:pspindle}
+\end{equation}
+This provides an independent estimate of spindle load, distinct from the directly
+logged \texttt{S1\_OutputPower}, and serves as a physical cross-check feature.
+
+\subsection{Classification Models}
+
+\textbf{Logistic Regression:} A multi-class linear classifier using the softmax
+function. For class $k$ with weight vector $\mathbf{w}_k$:
+\begin{equation}
+    P(y=k \mid \mathbf{x}) = \frac{e^{\mathbf{w}_k^T \mathbf{x}}}
+    {\sum_{j=1}^{K} e^{\mathbf{w}_j^T \mathbf{x}}}
+    \label{eq:logreg}
+\end{equation}
+Regularization parameter $C=10$ was selected via 5-fold cross-validation grid search.
+Implemented as \texttt{MultiOutputClassifier} to handle dual targets simultaneously.
+
+\textbf{Support Vector Machine (SVM):} A kernel-based classifier that maximizes the
+margin between classes. The decision boundary solves:
+\begin{equation}
+    \min_{\mathbf{w},b,\xi} \frac{1}{2}\|\mathbf{w}\|^2 + C\sum_{i=1}^{n}\xi_i
+    \label{eq:svm}
+\end{equation}
+subject to $y_i(\mathbf{w}^T\phi(\mathbf{x}_i)+b) \geq 1-\xi_i$. A linear kernel
+with $C=10$ was selected via grid search.
+
+\textbf{Random Forest:} An ensemble of $T$ decision trees trained on bootstrap samples,
+with predictions aggregated by majority vote:
+\begin{equation}
+    \hat{y} = \text{mode}\{h_t(\mathbf{x})\}_{t=1}^{T}
+    \label{eq:rf}
+\end{equation}
+Optimal hyperparameters: $T=200$ trees, \texttt{max\_depth}$=\infty$ (fully grown),
+selected via 5-fold cross-validation. Class weights were balanced to handle class
+imbalance in the machining process labels.
+
+\subsection{Regression Models}
+
+\textbf{Linear Regression:} Ordinary least squares estimation of spindle output power:
+\begin{equation}
+    \hat{y} = \mathbf{w}^T\mathbf{x} + b, \quad
+    \mathbf{w}^* = \arg\min_{\mathbf{w}} \|\mathbf{X}\mathbf{w} - \mathbf{y}\|^2
+    \label{eq:linreg}
+\end{equation}
+
+\textbf{Random Forest Regressor:} Ensemble of regression trees with predictions
+averaged across $T=100$ trees:
+\begin{equation}
+    \hat{y} = \frac{1}{T}\sum_{t=1}^{T} h_t(\mathbf{x})
+    \label{eq:rfr}
+\end{equation}
+
+\textbf{Support Vector Regressor (SVR):} Fits a function within an $\varepsilon$-tube
+around the training data:
+\begin{equation}
+    \min_{\mathbf{w}} \frac{1}{2}\|\mathbf{w}\|^2 + C\sum_{i=1}^{n}(\xi_i + \xi_i^*)
+    \label{eq:svr}
+\end{equation}
+subject to $|y_i - \mathbf{w}^T\phi(\mathbf{x}_i) - b| \leq \varepsilon + \xi_i^{(*)}$.
+
+% ── IV. RESULTS ───────────────────────────────────────────────────────────────
+\section{Results}
+\label{sec:results}
+
+\subsection{Classification Performance}
+
+Table~\ref{tab:clf} presents the classification results on the held-out test set for
+all three models across both targets. Random Forest substantially outperforms the
+linear methods on Target 1 (Machining Process), achieving 65.6\% accuracy versus
+26.1\% for Logistic Regression and 26.6\% for SVM. All models perform comparably on
+the engineered Target 2 (Machine State), achieving $\geq$96.8\% accuracy — a result
+expected given its deterministic construction from resultant velocity.
+
+\begin{table}[h]
+\caption{Classification Results on Test Set (218 Samples)}
+\label{tab:clf}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\multirow{2}{*}{\textbf{Model}} &
+\multicolumn{2}{c}{\textbf{Target 1 (Process)}} &
+\multicolumn{2}{c}{\textbf{Target 2 (State)}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+ & Acc. & F1 (W) & Acc. & F1 (W) \\
+\midrule
+Logistic Regression & 0.261 & 0.26 & 0.972 & 0.97 \\
+SVM (Linear)        & 0.266 & 0.27 & 0.968 & 0.97 \\
+Random Forest       & \textbf{0.656} & \textbf{0.66} & \textbf{1.000} & \textbf{1.00} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Detailed per-class metrics for Random Forest (Target 1) are given in
+Table~\ref{tab:rf_detail}, confirming strong performance across most machining classes.
+
+\begin{table}[h]
+\caption{Random Forest Per-Class Metrics — Machining Process (Target 1)}
+\label{tab:rf_detail}
+\centering
+\begin{tabular}{ccccc}
+\toprule
+\textbf{Class} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} & \textbf{Support} \\
+\midrule
+0 & 0.53 & 0.56 & 0.55 & 16 \\
+1 & 0.76 & 0.62 & 0.68 & 26 \\
+2 & 0.59 & 0.55 & 0.57 & 31 \\
+3 & 0.74 & 0.72 & 0.73 & 47 \\
+4 & 0.80 & 0.57 & 0.67 & 14 \\
+5 & 0.74 & 0.88 & 0.80 & 16 \\
+6 & 0.45 & 0.54 & 0.49 & 24 \\
+7 & 1.00 & 0.50 & 0.67 & 10 \\
+8 & 0.64 & 0.79 & 0.71 & 34 \\
+\midrule
+\textbf{Weighted Avg} & \textbf{0.67} & \textbf{0.66} & \textbf{0.66} & \textbf{218} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Regression Performance}
+
+Table~\ref{tab:reg} compares the three regression models. Linear Regression and Random
+Forest Regressor both achieve near-perfect $R^2 > 0.9998$, while SVR fails significantly
+($R^2 = 0.164$) due to its sensitivity to the default RBF kernel parameters and the
+narrow power range in the data.
+
+\begin{table}[h]
+\caption{Regression Results — Spindle Output Power Prediction}
+\label{tab:reg}
+\centering
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Model} & \textbf{RMSE} & \textbf{MAE} & $\mathbf{R^2}$ & \textbf{Adj.}~$\mathbf{R^2}$ \\
+\midrule
+Linear Regression    & 8.89e-4 & 6.24e-4 & 0.9999 & 0.9998 \\
+Random Forest        & \textbf{8.24e-4} & \textbf{5.52e-4} & \textbf{0.9999} & \textbf{0.9999} \\
+SVR                  & 7.37e-2 & 6.96e-2 & 0.164  & $-$0.073 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Learning Curves}
+
+Figs.~\ref{fig:lc_logistic}, \ref{fig:lc_svm}, and \ref{fig:lc_rf} show the learning
+curves for all three classification models. Logistic Regression and SVM both exhibit a
+large persistent gap between training and validation accuracy, indicative of underfitting
+on this non-linear, high-dimensional dataset. Random Forest achieves perfect training
+accuracy (1.00) with a converging validation curve reaching approximately 0.80 at full
+training size, suggesting mild overfitting that is expected to reduce with further data.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{Screenshot 2026-05-03 230956.png}
+    \caption{Learning curve — Logistic Regression. Large train/validation gap indicates
+             underfitting due to linear model insufficiency on non-linear CNC data.}
+    \label{fig:lc_logistic}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{Screenshot 2026-05-03 231033.png}
+    \caption{Learning curve — SVM (Linear kernel). Decreasing training accuracy with
+             increasing data size confirms the model is underfitting the feature space.}
+    \label{fig:lc_svm}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{Screenshot 2026-05-03 231101.png}
+    \caption{Learning curve — Random Forest. Training accuracy = 1.00 throughout;
+             validation accuracy converges toward 0.80, suggesting mild overfitting
+             that decreases with additional training data.}
+    \label{fig:lc_rf}
+\end{figure}
+
+\subsection{Residual Analysis}
+
+Fig.~\ref{fig:residual} shows the residual plot for the best regression model (Random
+Forest). Residuals are randomly distributed around zero with no systematic trend,
+confirming homoscedasticity and absence of model bias. Fig.~\ref{fig:avp} shows near-perfect
+alignment of predicted versus actual spindle output power values.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{Screenshot 2026-05-03 230926.png}
+    \caption{Residual plot for Random Forest Regressor. Residuals are randomly scattered
+             around zero, indicating no systematic prediction bias.}
+    \label{fig:residual}
+\end{figure}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{Screenshot 2026-05-03 230933.png}
+    \caption{Actual vs.\ predicted spindle output power — Random Forest Regressor.
+             Points align closely along the diagonal, confirming $R^2 = 0.9999$.}
+    \label{fig:avp}
+\end{figure}
+
+\subsection{Correlation Heatmap}
+
+Fig.~\ref{fig:heatmap} shows the feature correlation heatmap. Strong intra-axis
+correlations are visible (e.g., output power, current, and voltage within the same
+axis), while cross-axis correlations are weaker — justifying retention of all sensor
+channels as independent information sources.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.95\columnwidth]{Screenshot 2026-05-03 230355.png}
+    \caption{Pearson correlation heatmap of all 48 features. Diagonal blocks indicate
+             strong intra-axis correlations; off-diagonal blocks are largely uncorrelated.}
+    \label{fig:heatmap}
+\end{figure}
+
+\subsection{Statistical Significance Tests}
+
+To determine whether Random Forest's superiority is statistically significant, paired
+10-fold cross-validation scores were compared using both a paired $t$-test and the
+Wilcoxon signed-rank test (Table~\ref{tab:stats}).
+
+\begin{table}[h]
+\caption{Statistical Significance: RF vs.\ Baseline Models}
+\label{tab:stats}
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Comparison} & \textbf{RF Mean CV} & \textbf{$p$ (t-test)} & \textbf{$p$ (Wilcoxon)} \\
+\midrule
+RF vs.\ SVM      & 0.817 vs.\ 0.626 & $4.97 \times 10^{-8}$ & 0.00195 \\
+RF vs.\ Logistic & 0.817 vs.\ 0.607 & $2.28 \times 10^{-9}$ & 0.00195 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Both tests yield $p \ll 0.05$, confirming that Random Forest is \textit{statistically
+significantly} superior to both SVM and Logistic Regression — not merely numerically
+better by chance.
+
+% ── V. DISCUSSION ─────────────────────────────────────────────────────────────
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Engineering Interpretation}
+
+\textbf{Classification:} The low accuracy of Logistic Regression (26.1\%) and SVM
+(26.6\%) on the 9-class machining process target reflects the fundamentally non-linear
+decision boundaries required. CNC machining states are separated by complex combinations
+of axis dynamics that linear and kernel-linear models cannot adequately capture.
+Random Forest's 65.6\% accuracy is a meaningful result for a 9-class problem with
+highly overlapping sensor signatures between similar operations (e.g., roughing vs.
+finishing passes on the same axis).
+
+\textbf{Regression:} The Random Forest regressor achieves a relative RMSE of only
+0.37\%, qualifying as \textit{excellent} for engineering deployment. In physical units,
+the RMSE of $8.24 \times 10^{-4}$ kW (0.824 W) is negligible compared to typical
+spindle powers in the 140--220 W range observed in this dataset — well within
+measurement noise. Linear regression performs almost identically ($R^2 = 0.9998$),
+indicating that the relationship between input features and spindle output power is
+predominantly linear. SVR's poor performance ($R^2 = 0.164$) is attributed to the
+default RBF kernel being poorly matched to the linear power relationship and the
+very narrow output range ($\sim$0 to 0.22 W).
+
+\subsection{Feature Importance}
+
+For Random Forest classification, the top predictive features are
+\texttt{S1\_CommandPosition} (0.063), \texttt{S1\_ActualPosition} (0.061), and
+\texttt{Y1\_CurrentFeedback} (0.043), indicating that spindle position and axis
+current feedback are the primary discriminators of machining state. This aligns with
+engineering intuition: the spindle position encodes which part of the machining program
+is being executed, while current feedback reflects the actual cutting load.
+
+\subsection{Limitations and Failure Analysis}
+
+\begin{itemize}
+    \item \textbf{Class imbalance:} The 9-class machining process target has unequal
+          support (10--47 samples per class), contributing to lower recall on
+          minority classes (e.g., class 0: recall = 0.56, class 7: recall = 0.50).
+    \item \textbf{RF overfitting:} The training/validation gap in the RF learning curve
+          (Fig.~\ref{fig:lc_rf}) suggests overfitting. Applying SMOTE for minority
+          classes and tuning \texttt{min\_samples\_leaf} could reduce this.
+    \item \textbf{SVR failure:} The SVR regressor requires explicit kernel and
+          hyperparameter tuning (RBF $\gamma$, $\varepsilon$) to be competitive.
+          Without this, it cannot match linear models on near-linear targets.
+    \item \textbf{Dataset scope:} Results are specific to the machining conditions
+          in this experiment. Generalization to different materials, tools, or machines
+          requires transfer learning or domain adaptation.
+\end{itemize}
+
+% ── VI. CONCLUSION ────────────────────────────────────────────────────────────
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper demonstrated a complete machine learning pipeline for CNC milling process
+monitoring using multi-axis sensor data. Among three classification models, Random
+Forest achieved the highest accuracy of 65.6\% for 9-class machining process
+identification and 100\% for 3-class machine speed state prediction. For spindle
+output power regression, Random Forest and Linear Regression both achieved
+$R^2 > 0.9998$ with a relative RMSE of 0.37\% — well within engineering acceptance
+limits. Statistical significance tests (Wilcoxon $p = 0.00195$) confirmed that Random
+Forest's advantage over SVM and Logistic Regression is not due to chance. Based on
+these findings, \textbf{Random Forest is recommended for deployment} in real-time
+CNC process monitoring systems.
+
+Future work should investigate: (1) deep learning approaches (LSTM, 1D-CNN) for
+temporal sequence modeling of sensor streams; (2) SMOTE-based oversampling for
+minority machining classes; (3) online/incremental learning for adaptation to new
+tools and materials; and (4) model deployment on edge hardware for real-time
+in-process monitoring.
+
+% ── REFERENCES ────────────────────────────────────────────────────────────────
+\begin{thebibliography}{00}
+
+\bibitem{ref1}
+J. Lee, B. Bagheri, and H. A. Kao, ``A cyber-physical systems architecture for industry
+4.0-based manufacturing systems,'' \textit{Manufacturing Letters}, vol.~3, pp.~18--23,
+2015.
+
+\bibitem{ref2}
+Y. Altintas, \textit{Manufacturing Automation: Metal Cutting Mechanics, Machine Tool
+Vibrations, and CNC Design}, 2nd ed. Cambridge: Cambridge University Press, 2012.
+
+\bibitem{ref3}
+L. Breiman, ``Random forests,'' \textit{Machine Learning}, vol.~45, no.~1,
+pp.~5--32, 2001.
+
+\bibitem{ref4}
+C. Cortes and V. Vapnik, ``Support-vector networks,''
+\textit{Machine Learning}, vol.~20, no.~3, pp.~273--297, 1995.
+
+\bibitem{ref5}
+M. Dua and C. Graff, ``CNC Mill Tool Wear Dataset,''
+UCI Machine Learning Repository, 2019. [Online]. Available:
+\url{https://archive.ics.uci.edu/ml/datasets/CNC+Mill+Tool+Wear}
+
+\bibitem{ref6}
+T. Chen and C. Guestrin, ``XGBoost: A scalable tree boosting system,''
+in \textit{Proc. 22nd ACM SIGKDD Conf. Knowledge Discovery and Data Mining},
+pp.~785--794, 2016.
+
+\bibitem{ref7}
+F. Pedregosa \textit{et al.}, ``Scikit-learn: Machine learning in Python,''
+\textit{Journal of Machine Learning Research}, vol.~12, pp.~2825--2830, 2011.
+
+\bibitem{ref8}
+G. Georgoulas, T. Loutas, C. D. Stylios, and V. Kostopoulos, ``Bearing fault detection
+based on hybrid ensemble detector and empirical mode decomposition,''
+\textit{Mechanical Systems and Signal Processing}, vol.~41, pp.~510--525, 2013.
+
+\bibitem{ref9}
+A. Agogino and K. Goebel, ``CMAPSS Jet Engine Simulated Data,''
+NASA Ames Prognostics Data Repository, 2007. [Online]. Available:
+\url{https://ti.arc.nasa.gov/tech/dash/groups/pcoe/prognostic-data-repository/}
+
+\bibitem{ref10}
+N. V. Chawla, K. W. Bowyer, L. O. Hall, and W. P. Kegelmeyer,
+``SMOTE: Synthetic minority over-sampling technique,''
+\textit{Journal of Artificial Intelligence Research}, vol.~16, pp.~321--357, 2002.
+
+\end{thebibliography}
+
+\end{document}
